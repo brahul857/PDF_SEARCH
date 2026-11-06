@@ -221,7 +221,7 @@ def extract_labeled_values(pages):
                 "Keyboard / Mouse", "Warranty", "Installation",
                 "Country of Origin", "Delivery Period", "Inspection", "Acceptance",
                 "Seller Name", "Service Start Date", "Service End Date",
-                "Brand", "Model", "Quantity",         
+                "Brand", "Model", "Quantity",
                 "Buyer", "Service Provider",
             }:
                 break
@@ -643,7 +643,6 @@ with st.expander("Preview uploaded PDF", expanded=True):
     st.pdf(
         uploaded.getvalue(),
         height=600,
-        alt=f"Uploaded PDF: {uploaded.name}",
     )
 
 if selected_template_name and selected_template_name != "None":
