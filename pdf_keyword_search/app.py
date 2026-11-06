@@ -78,6 +78,19 @@ def find_keyword_matches(pages: List[Dict[str, Any]], keyword: str, context_char
     return matches
 
 
+def format_template_fields(raw_fields):
+    fields = []
+    seen = set()
+    for raw_field in raw_fields:
+        for field in re.split(r"[,;]", str(raw_field)):
+            field = re.sub(r"\s+", " ", field).strip(" \t:-")
+            normalized = re.sub(r"[^a-z0-9]+", "", field.lower())
+            if field and normalized and normalized not in seen:
+                seen.add(normalized)
+                fields.append(field)
+    return fields
+
+
 def extract_template_keyword_values(
     pages: List[Dict[str, Any]],
     keywords: List[str],
@@ -334,14 +347,9 @@ try:
                         available_templates[available_name_column].astype(str)
                         == selected_template_name
                     ].iloc[0]
-                    selected_template_keywords = [
-                        keyword.strip()
-                        for keyword in re.split(
-                            r"[,;]",
-                            str(selected_row[available_keyword_column] or ""),
-                        )
-                        if keyword.strip()
-                    ]
+                    selected_template_keywords = format_template_fields(
+                        [str(selected_row[available_keyword_column] or "")]
+                    )
                     st.caption(
                         "Keywords from template: "
                         + ", ".join(selected_template_keywords)

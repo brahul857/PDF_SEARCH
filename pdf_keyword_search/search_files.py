@@ -23,6 +23,21 @@ engine = create_engine(connection_url)
 DEFAULT_FILES_DIR = Path(__file__).resolve().parent / "files"
 
 
+def format_template_fields(raw_fields: Iterable[str]) -> list[str]:
+    fields = []
+    seen = set()
+    for raw_field in raw_fields:
+        if not isinstance(raw_field, str):
+            continue
+        for field in re.split(r"[,;]", raw_field):
+            field = re.sub(r"\s+", " ", field).strip(" \t:-")
+            normalized_field = field.lower()
+            if field and normalized_field not in seen:
+                seen.add(normalized_field)
+                fields.append(field)
+    return fields
+
+
 def extract_pdf_pages(pdf_path: Path) -> list[dict[str, object]]:
     return extract_shared_pdf_pages(pdf_path)
 
@@ -120,11 +135,16 @@ def search_template_fields(
     fields: Iterable[str],
 ) -> list[dict[str, object]]:
     """Extract only the selected template fields from every uploaded PDF."""
-    field_list = [
-        field.strip()
-        for field in fields
-        if isinstance(field, str) and field.strip()
-    ]
+    field_list = []
+    seen_fields = set()
+    for field in fields:
+        if not isinstance(field, str):
+            continue
+        field = re.sub(r"\s+", " ", field).strip(" \t:-")
+        normalized = re.sub(r"[^a-z0-9]+", "", field.lower())
+        if field and normalized and normalized not in seen_fields:
+            seen_fields.add(normalized)
+            field_list.append(field)
     if not field_list:
         return []
 
@@ -137,18 +157,32 @@ def search_template_fields(
 
         for field in field_list:
             found = False
-            field_pattern = re.compile(
-                rf"(?i)^.*?{re.escape(field)}\s*[:\-]\s*(.*)$"
-            )
+            field_normalized = re.sub(r"[^a-z0-9]+", "", field.lower())
             for page in pages:
                 lines = str(page["text"]).splitlines()
                 for index, line in enumerate(lines):
                     compact_line = re.sub(r"\s+", " ", line).strip()
-                    match = field_pattern.match(compact_line)
-                    if not match:
+                    if ":" in compact_line:
+                        line_label, line_value = compact_line.split(":", 1)
+                    elif "-" in compact_line:
+                        line_label, line_value = compact_line.split("-", 1)
+                    else:
+                        line_label, line_value = compact_line, ""
+
+                    line_label = re.sub(
+                        r"^\s*\d+[.)]\s*",
+                        "",
+                        line_label,
+                    ).strip(" \t:-")
+                    line_normalized = re.sub(
+                        r"[^a-z0-9]+",
+                        "",
+                        line_label.lower(),
+                    )
+                    if line_normalized != field_normalized:
                         continue
 
-                    value = match.group(1).strip(" \t:-")
+                    value = line_value.strip(" \t:-")
                     if not value and index + 1 < len(lines):
                         value = re.sub(
                             r"\s+",
@@ -365,14 +399,13 @@ def run_streamlit(set_page_config: bool = True) -> None:
                                 selected_template = templates[
                                     templates[name_column].astype(str) == template_name
                                 ].iloc[0]
-                                template_keywords = [
-                                    keyword.strip()
-                                    for keyword in re.split(
-                                        r"[,;]",
-                                        str(selected_template[keyword_column] or ""),
-                                    )
-                                    if keyword.strip()
-                                ]
+                                template_keywords = format_template_fields(
+                                    [
+                                        str(
+                                            selected_template[keyword_column] or ""
+                                        )
+                                    ]
+                                )
                                 st.caption(
                                     "Template keywords: "
                                     + ", ".join(template_keywords)
