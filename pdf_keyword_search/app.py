@@ -394,13 +394,6 @@ st.caption(f"Saved as `{saved_pdf_path.name}` in `{FILES_DIR}`")
 
 st.success(f"Loaded one PDF successfully: {len(pages)} page(s). Upload another file to replace this one.")
 
-with st.expander("Preview uploaded PDF", expanded=True):
-    st.pdf(
-        uploaded.getvalue(),
-        height=600,
-        alt=f"Uploaded PDF: {uploaded.name}",
-    )
-
 if selected_template_name and selected_template_name != "None":
     st.subheader("Template keyword values")
     template_values_df = extract_template_keyword_values(

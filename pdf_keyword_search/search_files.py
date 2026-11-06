@@ -115,6 +115,64 @@ def search_files(
     return matches
 
 
+def search_template_fields(
+    files_dir: Path,
+    fields: Iterable[str],
+) -> list[dict[str, object]]:
+    """Extract only the selected template fields from every uploaded PDF."""
+    field_list = [
+        field.strip()
+        for field in fields
+        if isinstance(field, str) and field.strip()
+    ]
+    if not field_list:
+        return []
+
+    matches = []
+    for pdf_path in sorted(files_dir.glob("*.pdf")):
+        try:
+            pages = extract_pdf_pages(pdf_path)
+        except Exception:
+            continue
+
+        for field in field_list:
+            found = False
+            field_pattern = re.compile(
+                rf"(?i)^.*?{re.escape(field)}\s*[:\-]\s*(.*)$"
+            )
+            for page in pages:
+                lines = str(page["text"]).splitlines()
+                for index, line in enumerate(lines):
+                    compact_line = re.sub(r"\s+", " ", line).strip()
+                    match = field_pattern.match(compact_line)
+                    if not match:
+                        continue
+
+                    value = match.group(1).strip(" \t:-")
+                    if not value and index + 1 < len(lines):
+                        value = re.sub(
+                            r"\s+",
+                            " ",
+                            lines[index + 1],
+                        ).strip()
+                    if value:
+                        matches.append({
+                            "File": pdf_path.name,
+                            "Match type": "Template field",
+                            "Keyword": field,
+                            "Page": page["page"],
+                            "Section": "",
+                            "Label": field,
+                            "Value": value,
+                            "Context": f"{field}: {value}",
+                        })
+                        found = True
+                        break
+                if found:
+                    break
+    return matches
+
+
 def write_csv(matches: list[dict[str, object]], output_path: Path) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open("w", encoding="utf-8-sig", newline="") as output:
@@ -322,24 +380,24 @@ def run_streamlit(set_page_config: bool = True) -> None:
             except Exception as exc:
                 st.warning(f"Could not load templates: {exc}")
 
-            keywords_input = st.text_input(
-                "Keywords",
-                placeholder="warranty, GEMC-SAMPLE",
-            )
+            keywords_input = ""
+            if not template_name or template_name == "None":
+                keywords_input = st.text_input(
+                    "Keywords",
+                    placeholder="warranty, GEMC-SAMPLE",
+                )
             search_submitted = st.form_submit_button(
-                "Search Database",
+                (
+                    "Search Template Fields"
+                    if template_name and template_name != "None"
+                    else "Search Database"
+                ),
                 type="primary",
                 use_container_width=True,
             )
 
     if template_name and template_name != "None":
         keywords = template_keywords
-        if keywords_input.strip():
-            keywords.extend(
-                keyword.strip()
-                for keyword in re.split(r"[,;]", keywords_input)
-                if keyword.strip()
-            )
     else:
         keywords = [
             keyword.strip()
@@ -357,7 +415,7 @@ def run_streamlit(set_page_config: bool = True) -> None:
 
     try:
         if template_name and template_name != "None":
-            matches = search_files(files_dir, keywords)
+            matches = search_template_fields(files_dir, keywords)
         else:
             matches = search_database(engine, keywords)
     except Exception as exc:
@@ -413,8 +471,6 @@ def run_streamlit(set_page_config: bool = True) -> None:
                         continue
                     with st.container(border=True):
                         st.markdown(f"**{file_name}**")
-                        with st.expander(f"Preview {file_name}", expanded=True):
-                            st.pdf(saved_path.read_bytes(), height=600)
                         st.download_button(
                             "Download file",
                             data=saved_path.read_bytes(),
@@ -435,14 +491,6 @@ def run_streamlit(set_page_config: bool = True) -> None:
                     st.markdown(f"**{original_file or saved_path.name}**")
                     if saved_path.is_file():
                         download_name = original_file or saved_path.name
-                        with st.expander(
-                            f"Preview {original_file or saved_path.name}",
-                            expanded=True,
-                        ):
-                            st.pdf(
-                                saved_path.read_bytes(),
-                                height=600,
-                            )
                         st.download_button(
                             "Download file",
                             data=saved_path.read_bytes(),
