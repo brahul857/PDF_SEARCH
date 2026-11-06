@@ -267,12 +267,7 @@ if menu == "SLA Extractor":
 
 st.title("🔎 PDF Keyword & Value Finder")
 st.caption("Upload one PDF at a time, search any keyword, and inspect the matching text with page numbers.")
-select=st.selectbox(
-        "Select a theme",
-        options=["Light", "Dark"],
-        index=0,
-        key="theme_selector"
-    )
+
 with st.sidebar:
     st.header("How to use")
     st.markdown(
