@@ -643,7 +643,7 @@ with st.expander("Preview uploaded PDF", expanded=True):
     st.pdf(
         uploaded.getvalue(),
         height=600,
-        alt=f"Uploaded PDF: {uploaded.name}",
+        alt=f"Uploaded PDF: {uploaded.name}"
     )
 
 if selected_template_name and selected_template_name != "None":
