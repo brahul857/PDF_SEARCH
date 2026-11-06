@@ -3,6 +3,7 @@ from typing import Any, Dict, List, Union
 from functools import lru_cache
 
 import pymupdf
+import re
 
 
 @lru_cache(maxsize=1)
@@ -62,3 +63,35 @@ def extract_pdf_pages(
     finally:
         document.close()
     return pages
+
+
+def extract_template_field_value(
+    source: Union[List[Dict[str, Any]], str],
+    field_name: str,
+) -> str:
+    """Extract the value following a template field name."""
+    if isinstance(source, str):
+        text_by_page = [(1, source)]
+    else:
+        text_by_page = [
+            (item.get("page", page_number), str(item.get("text", "")))
+            for page_number, item in enumerate(source, start=1)
+        ]
+
+    pattern = re.compile(
+        rf"(?im)^\s*{re.escape(field_name.strip())}\s*[:\-]?\s*(.*)$",
+    )
+    for _, text in text_by_page:
+        lines = text.splitlines()
+        for index, line in enumerate(lines):
+            line = re.sub(r"\s+", " ", line).strip()
+            match = pattern.match(line)
+            if not match:
+                continue
+
+            value = match.group(1).strip(" \t:-")
+            if not value and index + 1 < len(lines):
+                value = re.sub(r"\s+", " ", lines[index + 1]).strip()
+            if value:
+                return value
+    return ""
