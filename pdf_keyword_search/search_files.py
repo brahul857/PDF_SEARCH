@@ -5,7 +5,10 @@ import sys
 from pathlib import Path
 from typing import Iterable
 
-from pdf_reader import extract_pdf_pages as extract_shared_pdf_pages
+from pdf_reader import (
+    extract_pdf_pages as extract_shared_pdf_pages,
+    extract_template_field_value,
+)
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import URL
 
@@ -157,51 +160,20 @@ def search_template_fields(
 
         for field in field_list:
             found = False
-            field_normalized = re.sub(r"[^a-z0-9]+", "", field.lower())
             for page in pages:
-                lines = str(page["text"]).splitlines()
-                for index, line in enumerate(lines):
-                    compact_line = re.sub(r"\s+", " ", line).strip()
-                    if ":" in compact_line:
-                        line_label, line_value = compact_line.split(":", 1)
-                    elif "-" in compact_line:
-                        line_label, line_value = compact_line.split("-", 1)
-                    else:
-                        line_label, line_value = compact_line, ""
-
-                    line_label = re.sub(
-                        r"^\s*\d+[.)]\s*",
-                        "",
-                        line_label,
-                    ).strip(" \t:-")
-                    line_normalized = re.sub(
-                        r"[^a-z0-9]+",
-                        "",
-                        line_label.lower(),
-                    )
-                    if line_normalized != field_normalized:
-                        continue
-
-                    value = line_value.strip(" \t:-")
-                    if not value and index + 1 < len(lines):
-                        value = re.sub(
-                            r"\s+",
-                            " ",
-                            lines[index + 1],
-                        ).strip()
-                    if value:
-                        matches.append({
-                            "File": pdf_path.name,
-                            "Match type": "Template field",
-                            "Keyword": field,
-                            "Page": page["page"],
-                            "Section": "",
-                            "Label": field,
-                            "Value": value,
-                            "Context": f"{field}: {value}",
-                        })
-                        found = True
-                        break
+                value = extract_template_field_value([page], field)
+                if value:
+                    matches.append({
+                        "File": pdf_path.name,
+                        "Match type": "Template field",
+                        "Keyword": field,
+                        "Page": page["page"],
+                        "Section": "",
+                        "Label": field,
+                        "Value": value,
+                        "Context": f"{field}: {value}",
+                    })
+                    found = True
                 if found:
                     break
     return matches
