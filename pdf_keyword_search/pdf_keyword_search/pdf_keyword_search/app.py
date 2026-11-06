@@ -249,9 +249,24 @@ def experimental_rerun():
 
 menu = st.sidebar.radio(
     "Menu",
-    options=["Upload & Search", "Search Saved Files", "SLA Extractor"],
+    options=[
+        "Upload & Search",
+        "Template Management",
+        "Search Saved Files",
+        "SLA Extractor",
+    ],
     index=0,
 )
+
+if menu == "Template Management":
+    from template_management import run_template_management
+
+    run_template_management(
+        connection_url=connection_url,
+        files_dir=FILES_DIR,
+        set_page_config=False,
+    )
+    st.stop()
 
 if menu == "Search Saved Files":
     from search_files import run_streamlit as run_saved_files_search
@@ -267,12 +282,7 @@ if menu == "SLA Extractor":
 
 st.title("🔎 PDF Keyword & Value Finder")
 st.caption("Upload one PDF at a time, search any keyword, and inspect the matching text with page numbers.")
-select=st.selectbox(
-        "Select a theme",
-        options=["Light", "Dark"],
-        index=0,
-        key="theme_selector"
-    )
+
 with st.sidebar:
     st.header("How to use")
     st.markdown(
@@ -282,261 +292,6 @@ with st.sidebar:
         "4. Download the results as CSV."
     )
     st.info("Text-based PDFs work best. Scanned/image-only PDFs need OCR.")
-
-
-st.subheader("Add template and keywords")
-with st.form("add_template_form", clear_on_submit=True):
-    template_name = st.text_input("Template name", placeholder="e.g. GeM Contract")
-    template_keywords = st.text_input(
-        "Keywords",
-        placeholder="warranty, seller, contract number",
-    )
-    template_pdf = st.file_uploader(
-        "Template PDF (optional)",
-        type=["pdf"],
-        key="template_pdf_uploader",
-    )
-    add_template = st.form_submit_button(
-        "Add Template",
-        type="primary",
-        use_container_width=True,
-    )
-
-if add_template:
-    template_name = template_name.strip()
-    template_keywords = [
-        item.strip()
-        for item in re.split(r"[,;]", template_keywords)
-        if item.strip()
-    ]
-    if not template_name:
-        st.error("Enter a template name.")
-    elif not template_keywords:
-        st.error("Enter at least one keyword.")
-    else:
-        template_pdf_name = template_pdf.name if template_pdf else ""
-        template_pdf_path = ""
-        if template_pdf:
-            template_content = template_pdf.getvalue()
-            template_filename = (
-                f"{uuid.uuid4().hex}_{template_pdf.name}"
-            )
-            template_path = FILES_DIR / template_filename
-            template_path.write_bytes(template_content)
-            template_pdf_name = template_pdf.name
-            template_pdf_path = template_path.name
-
-        template_row = pd.DataFrame([{
-            "Template Name": template_name,
-            "Keywords": ", ".join(template_keywords),
-            "PDF File Name": template_pdf_name,
-            "PDF File Path": template_pdf_path,
-        }])
-        try:
-            template_engine = create_engine(
-                connection_url,
-                fast_executemany=True,
-            )
-            template_table = "Template_master"
-            inspector = inspect(template_engine)
-            if not inspector.has_table(template_table):
-                with template_engine.begin() as connection:
-                    connection.execute(text(
-                        "CREATE TABLE [Template_master] ("
-                        "[Template_ID] int IDENTITY(1,1) PRIMARY KEY, "
-                        "[Template_Name] nvarchar(500) NOT NULL, "
-                        "[Keywords] nvarchar(max) NOT NULL, "
-                        "[PDF_File_Name] nvarchar(500) NULL, "
-                        "[PDF_File_Path] nvarchar(500) NULL"
-                        ")"
-                    ))
-                inspector = inspect(template_engine)
-
-            existing_template_columns = [
-                column["name"]
-                for column in inspector.get_columns(template_table)
-            ]
-            column_lookup = {
-                re.sub(r"[^a-z0-9]+", "", column.lower()).strip(): column
-                for column in existing_template_columns
-            }
-            insert_values = {}
-            for normalized_name, value in {
-                "templatename": template_name,
-                "template": template_name,
-                "name": template_name,
-                "keywords": ", ".join(template_keywords),
-                "keyword": ", ".join(template_keywords),
-                "pdffilename": template_pdf_name,
-                "filename": template_pdf_name,
-                "pdffilepath": template_pdf_path,
-                "filepath": template_pdf_path,
-            }.items():
-                if normalized_name in column_lookup:
-                    insert_values[column_lookup[normalized_name]] = value
-
-            if not insert_values:
-                raise LookupError(
-                    "Template_master has no recognized template or keyword columns."
-                )
-            insert_row = pd.DataFrame([insert_values])
-            insert_row.to_sql(
-                template_table,
-                con=template_engine,
-                if_exists="append",
-                index=False,
-            )
-            st.success(f"Template '{template_name}' added successfully.")
-        except Exception as exc:
-            st.error(f"Could not add template: {exc}")
-
-try:
-    template_engine = create_engine(connection_url)
-    inspector = inspect(template_engine)
-    template_table = "Template_master"
-    if inspector.has_table(template_table):
-        with template_engine.connect() as connection:
-            template_df = pd.read_sql(
-                text(
-                    f"SELECT * FROM [{template_table}]"
-                ),
-                connection,
-            )
-        st.subheader("Saved templates")
-        if template_df.empty:
-            st.info("No templates have been added.")
-        else:
-            st.dataframe(template_df, use_container_width=True, hide_index=True)
-
-            template_columns = {
-                re.sub(r"[^a-z0-9]+", "", str(column).lower()):
-                str(column)
-                for column in template_df.columns
-            }
-            template_name_column = (
-                template_columns.get("templatename")
-                or template_columns.get("template")
-                or template_columns.get("name")
-            )
-            keyword_column = (
-                template_columns.get("keywords")
-                or template_columns.get("keyword")
-            )
-            pdf_name_column = (
-                template_columns.get("pdffilename")
-                or template_columns.get("filename")
-            )
-            pdf_path_column = (
-                template_columns.get("pdffilepath")
-                or template_columns.get("filepath")
-            )
-            id_column = template_columns.get("templateid")
-
-            if not template_name_column or not keyword_column:
-                st.error(
-                    "Template_master must contain a template name and keyword column."
-                )
-            else:
-                st.subheader("Edit template")
-                template_options = {
-                    (str(row[id_column]) if id_column else str(index)): row
-                    for index, row in template_df.iterrows()
-                }
-                selected_template_key = st.selectbox(
-                    "Select template to edit",
-                    options=list(template_options.keys()),
-                    format_func=lambda key: template_options[key][template_name_column],
-                )
-                selected_template = template_options[selected_template_key]
-
-                with st.form("edit_template_form"):
-                    edited_name = st.text_input(
-                        "Template name",
-                        value=str(selected_template[template_name_column] or ""),
-                    )
-                    edited_keywords = st.text_input(
-                        "Keywords",
-                        value=str(selected_template[keyword_column] or ""),
-                    )
-                    edited_pdf = st.file_uploader(
-                        "Replace template PDF (optional)",
-                        type=["pdf"],
-                        key=f"edit_template_pdf_{selected_template_key}",
-                    )
-                    update_template = st.form_submit_button(
-                        "Update Template",
-                        type="primary",
-                        use_container_width=True,
-                    )
-
-                if update_template:
-                    edited_name = edited_name.strip()
-                    edited_keywords = edited_keywords.strip().strip(",;")
-                    if not edited_name or not edited_keywords:
-                        st.error("Template name and keywords are required.")
-                    else:
-                        pdf_name = (
-                            str(selected_template[pdf_name_column] or "")
-                            if pdf_name_column else ""
-                        )
-                        pdf_path = (
-                            str(selected_template[pdf_path_column] or "")
-                            if pdf_path_column else ""
-                        )
-                        if edited_pdf:
-                            edited_pdf_filename = (
-                                f"{uuid.uuid4().hex}_{edited_pdf.name}"
-                            )
-                            edited_pdf_path = FILES_DIR / edited_pdf_filename
-                            edited_pdf_path.write_bytes(edited_pdf.getvalue())
-                            pdf_name = edited_pdf.name
-                            pdf_path = edited_pdf_path.name
-
-                        update_columns = {
-                            template_name_column: edited_name,
-                            keyword_column: edited_keywords,
-                        }
-                        if pdf_name_column:
-                            update_columns[pdf_name_column] = pdf_name
-                        if pdf_path_column:
-                            update_columns[pdf_path_column] = pdf_path
-
-                        set_clauses = [
-                            f"[{column.replace(']', ']]')}] = :value_{index}"
-                            for index, column in enumerate(update_columns.keys())
-                        ]
-                        parameters = {
-                            f"value_{index}": value
-                            for index, value in enumerate(update_columns.values())
-                        }
-
-                        if id_column and str(selected_template[id_column]) != "":
-                            where_clause = (
-                                f"[{id_column.replace(']', ']]')}] = :template_id"
-                            )
-                            parameters["template_id"] = selected_template[id_column]
-                        else:
-                            original_name = str(
-                                selected_template[template_name_column] or ""
-                            )
-                            where_clause = (
-                                f"[{template_name_column.replace(']', ']]')}] = "
-                                ":original_name"
-                            )
-                            parameters["original_name"] = original_name
-
-                        with template_engine.begin() as connection:
-                            connection.execute(
-                                text(
-                                    f"UPDATE [{template_table}] SET "
-                                    f"{', '.join(set_clauses)} WHERE {where_clause}"
-                                ),
-                                parameters,
-                            )
-                        st.success(f"Template '{edited_name}' updated successfully.")
-                        st.rerun()
-except Exception as exc:
-    st.warning(f"Could not load saved templates: {exc}")
 
 
 st.subheader("Select template")
