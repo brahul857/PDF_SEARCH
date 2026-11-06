@@ -5,6 +5,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 from sqlalchemy import create_engine, inspect, text
+from pdf_reader import extract_pdf_pages
 
 
 def _column_lookup(dataframe):
@@ -12,6 +13,37 @@ def _column_lookup(dataframe):
         re.sub(r"[^a-z0-9]+", "", str(column).lower()).strip(): str(column)
         for column in dataframe.columns
     }
+
+
+def _extract_template_fields(pdf_bytes, max_fields=30):
+    fields = []
+    seen = set()
+    try:
+        pages = extract_pdf_pages(pdf_bytes)
+    except Exception:
+        return fields
+
+    for page in pages:
+        for raw_line in str(page.get("text", "")).splitlines():
+            line = re.sub(r"\s+", " ", raw_line).strip()
+            if ":" not in line:
+                continue
+
+            label, value = line.split(":", 1)
+            label = re.sub(r"^\s*\d+[.)]\s*", "", label).strip(" \t:-")
+            value = value.strip()
+            normalized = re.sub(r"[^a-z0-9]+", "", label.lower())
+            if (
+                label
+                and value
+                and 1 <= len(label) <= 80
+                and normalized not in seen
+            ):
+                seen.add(normalized)
+                fields.append(label)
+                if len(fields) >= max_fields:
+                    return fields
+    return fields
 
 
 def run_template_management(connection_url, files_dir, set_page_config=True):
@@ -38,7 +70,7 @@ def run_template_management(connection_url, files_dir, set_page_config=True):
                 placeholder="e.g. GeM Contract",
             )
             keywords = st.text_input(
-                "Keywords",
+                "Key fields / keywords",
                 placeholder="warranty, seller, contract number",
             )
             template_pdf = st.file_uploader(
@@ -61,8 +93,6 @@ def run_template_management(connection_url, files_dir, set_page_config=True):
             ]
             if not template_name:
                 st.error("Enter a template name.")
-            elif not keyword_list:
-                st.error("Enter at least one keyword.")
             else:
                 pdf_name = ""
                 pdf_path = ""
@@ -72,6 +102,21 @@ def run_template_management(connection_url, files_dir, set_page_config=True):
                     Path(files_dir).joinpath(pdf_path).write_bytes(
                         template_pdf.getvalue()
                     )
+                    if not keyword_list:
+                        keyword_list = _extract_template_fields(
+                            template_pdf.getvalue()
+                        )
+                        if keyword_list:
+                            st.info(
+                                "Prepared key fields from the template PDF: "
+                                + ", ".join(keyword_list)
+                            )
+
+                if not keyword_list:
+                    st.error(
+                        "Enter key fields, or upload a template PDF with label: value lines."
+                    )
+                    return
 
                 try:
                     if not inspector.has_table(table_name):

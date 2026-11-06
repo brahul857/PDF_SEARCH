@@ -5,6 +5,7 @@ description = "Streamlit app for searching text and values in PDF documents"
 requires-python = ">=3.10"
 dependencies = [
     "streamlit[pdf]>=1.35.0",
+    "streamlit-pdf>=1.0.0",
     "pymupdf>=1.24.0",
     "pandas>=2.0.0",
     "pdfplumber",

@@ -129,8 +129,6 @@ def run_streamlit(set_page_config=True):
     content = uploaded.getvalue()
     content_hash = hashlib.sha256(content).hexdigest()
 
-    st.pdf(content, height=500, alt=f"SLA PDF: {uploaded.name}")
-
     if st.button("Extract SLA", type="primary", use_container_width=True):
         with tempfile.TemporaryDirectory() as temp_dir:
             pdf_path = Path(temp_dir) / uploaded.name
