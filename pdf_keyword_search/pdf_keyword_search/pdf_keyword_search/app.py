@@ -11,7 +11,7 @@ import pandas as pd
 import pyodbc
 import streamlit as st
 
-from pdf_reader import extract_pdf_pages
+from pdf_reader import extract_pdf_pages, extract_template_field_value
 
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import URL
@@ -102,34 +102,21 @@ def extract_template_keyword_values(
         if not keyword:
             continue
 
-        found = False
-        pattern = re.compile(
-            rf"(?im)^\s*{re.escape(keyword)}\s*[:\-]?\s*(.*)$",
-        )
+        value = ""
+        page_number = ""
         for item in pages:
-            lines = item["text"].splitlines()
-            for index, line in enumerate(lines):
-                line = re.sub(r"\s+", " ", line).strip()
-                match = pattern.match(line)
-                if not match:
-                    continue
-
-                value = match.group(1).strip(" \t:-")
-                if not value and index + 1 < len(lines):
-                    value = re.sub(r"\s+", " ", lines[index + 1]).strip()
-
-                if value:
-                    rows.append({
-                        "Keyword": keyword,
-                        "Value": value,
-                        "Page": item["page"],
-                    })
-                    found = True
-                    break
-            if found:
+            value = extract_template_field_value([item], keyword)
+            if value:
+                page_number = item["page"]
                 break
 
-        if not found:
+        if value:
+            rows.append({
+                "Keyword": keyword,
+                "Value": value,
+                "Page": page_number,
+            })
+        else:
             rows.append({
                 "Keyword": keyword,
                 "Value": "Not found",

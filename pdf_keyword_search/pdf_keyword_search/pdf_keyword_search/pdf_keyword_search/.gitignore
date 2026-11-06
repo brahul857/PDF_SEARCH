@@ -8,4 +8,3 @@ __pycache__/
 .env.*
 *.env
 *.log
-pdf_keyword_search/files/
