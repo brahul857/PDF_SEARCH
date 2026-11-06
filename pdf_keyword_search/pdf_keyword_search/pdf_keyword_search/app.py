@@ -78,6 +78,19 @@ def find_keyword_matches(pages: List[Dict[str, Any]], keyword: str, context_char
     return matches
 
 
+def format_template_fields(raw_fields):
+    fields = []
+    seen = set()
+    for raw_field in raw_fields:
+        for field in re.split(r"[,;]", str(raw_field)):
+            field = re.sub(r"\s+", " ", field).strip(" \t:-")
+            normalized = re.sub(r"[^a-z0-9]+", "", field.lower())
+            if field and normalized and normalized not in seen:
+                seen.add(normalized)
+                fields.append(field)
+    return fields
+
+
 def extract_template_keyword_values(
     pages: List[Dict[str, Any]],
     keywords: List[str],
@@ -252,8 +265,8 @@ menu = st.sidebar.radio(
     options=[
         "Upload & Search",
         "Template Management",
-        "Search Saved Files",
-        "SLA Extractor",
+        "Search Saved Files"
+       # "SLA Extractor",
     ],
     index=0,
 )
@@ -274,11 +287,11 @@ if menu == "Search Saved Files":
     run_saved_files_search(set_page_config=False)
     st.stop()
 
-if menu == "SLA Extractor":
+# if menu == "SLA Extractor":
     from sla_extract import run_streamlit as run_sla_extractor
 
-    run_sla_extractor(set_page_config=False)
-    st.stop()
+#     run_sla_extractor(set_page_config=False)
+#     st.stop()
 
 st.title("🔎 PDF Keyword & Value Finder")
 st.caption("Upload one PDF at a time, search any keyword, and inspect the matching text with page numbers.")
@@ -334,14 +347,9 @@ try:
                         available_templates[available_name_column].astype(str)
                         == selected_template_name
                     ].iloc[0]
-                    selected_template_keywords = [
-                        keyword.strip()
-                        for keyword in re.split(
-                            r"[,;]",
-                            str(selected_row[available_keyword_column] or ""),
-                        )
-                        if keyword.strip()
-                    ]
+                    selected_template_keywords = format_template_fields(
+                        [str(selected_row[available_keyword_column] or "")]
+                    )
                     st.caption(
                         "Keywords from template: "
                         + ", ".join(selected_template_keywords)
@@ -394,12 +402,6 @@ st.caption(f"Saved as `{saved_pdf_path.name}` in `{FILES_DIR}`")
 
 st.success(f"Loaded one PDF successfully: {len(pages)} page(s). Upload another file to replace this one.")
 
-with st.expander("Preview uploaded PDF", expanded=True):
-    st.pdf(
-        uploaded.getvalue(),
-        height=600,
-    )
-
 if selected_template_name and selected_template_name != "None":
     st.subheader("Template keyword values")
     template_values_df = extract_template_keyword_values(
@@ -407,31 +409,7 @@ if selected_template_name and selected_template_name != "None":
         selected_template_keywords,
     )
     st.dataframe(template_values_df, use_container_width=True, hide_index=True)
-    st.download_button(
-        "Download template values (CSV)",
-        data=template_values_df.to_csv(index=False).encode("utf-8-sig"),
-        file_name=f"{selected_template_name}_keyword_values.csv",
-        mime="text/csv",
-    )
-
-st.subheader("Search by keyword")
-keyword = st.text_input("Enter keyword", placeholder="e.g. contract number, seller, Canon, warranty, total value")
-if keyword.strip():
-    matches = find_keyword_matches(pages, keyword.strip())
-    st.write(f"Found **{len(matches)}** match(es) for **{keyword.strip()}**.")
-    if matches:
-        df_matches = pd.DataFrame(matches)
-        
-        st.success("Results saved to the database successfully.")
-        st.dataframe(df_matches, use_container_width=True, hide_index=True)
-        st.download_button(
-            "Download keyword results (CSV)",
-            data=df_matches.to_csv(index=False).encode("utf-8-sig"),
-            file_name="keyword_search_results.csv",
-            mime="text/csv"
-        )
-    else:
-        st.warning("No match found. Try a shorter keyword or a different spelling.")
+ 
 
 st.subheader("Automatically detected values")
 st.caption("These are best-effort label/value matches. Always verify them against the source PDF.")
