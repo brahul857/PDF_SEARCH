@@ -221,7 +221,7 @@ def extract_labeled_values(pages):
                 "Keyboard / Mouse", "Warranty", "Installation",
                 "Country of Origin", "Delivery Period", "Inspection", "Acceptance",
                 "Seller Name", "Service Start Date", "Service End Date",
-                "Brand", "Model", "Quantity",
+                "Brand", "Model", "Quantity",         
                 "Buyer", "Service Provider",
             }:
                 break
