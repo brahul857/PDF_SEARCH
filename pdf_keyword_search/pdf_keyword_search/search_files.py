@@ -23,6 +23,21 @@ engine = create_engine(connection_url)
 DEFAULT_FILES_DIR = Path(__file__).resolve().parent / "files"
 
 
+def format_template_fields(raw_fields: Iterable[str]) -> list[str]:
+    fields = []
+    seen = set()
+    for raw_field in raw_fields:
+        if not isinstance(raw_field, str):
+            continue
+        for field in re.split(r"[,;]", raw_field):
+            field = re.sub(r"\s+", " ", field).strip(" \t:-")
+            normalized_field = field.lower()
+            if field and normalized_field not in seen:
+                seen.add(normalized_field)
+                fields.append(field)
+    return fields
+
+
 def extract_pdf_pages(pdf_path: Path) -> list[dict[str, object]]:
     return extract_shared_pdf_pages(pdf_path)
 
@@ -112,6 +127,83 @@ def search_files(
                 match_mode=match_mode,
             )
         )
+    return matches
+
+
+def search_template_fields(
+    files_dir: Path,
+    fields: Iterable[str],
+) -> list[dict[str, object]]:
+    """Extract only the selected template fields from every uploaded PDF."""
+    field_list = []
+    seen_fields = set()
+    for field in fields:
+        if not isinstance(field, str):
+            continue
+        field = re.sub(r"\s+", " ", field).strip(" \t:-")
+        normalized = re.sub(r"[^a-z0-9]+", "", field.lower())
+        if field and normalized and normalized not in seen_fields:
+            seen_fields.add(normalized)
+            field_list.append(field)
+    if not field_list:
+        return []
+
+    matches = []
+    for pdf_path in sorted(files_dir.glob("*.pdf")):
+        try:
+            pages = extract_pdf_pages(pdf_path)
+        except Exception:
+            continue
+
+        for field in field_list:
+            found = False
+            field_normalized = re.sub(r"[^a-z0-9]+", "", field.lower())
+            for page in pages:
+                lines = str(page["text"]).splitlines()
+                for index, line in enumerate(lines):
+                    compact_line = re.sub(r"\s+", " ", line).strip()
+                    if ":" in compact_line:
+                        line_label, line_value = compact_line.split(":", 1)
+                    elif "-" in compact_line:
+                        line_label, line_value = compact_line.split("-", 1)
+                    else:
+                        line_label, line_value = compact_line, ""
+
+                    line_label = re.sub(
+                        r"^\s*\d+[.)]\s*",
+                        "",
+                        line_label,
+                    ).strip(" \t:-")
+                    line_normalized = re.sub(
+                        r"[^a-z0-9]+",
+                        "",
+                        line_label.lower(),
+                    )
+                    if line_normalized != field_normalized:
+                        continue
+
+                    value = line_value.strip(" \t:-")
+                    if not value and index + 1 < len(lines):
+                        value = re.sub(
+                            r"\s+",
+                            " ",
+                            lines[index + 1],
+                        ).strip()
+                    if value:
+                        matches.append({
+                            "File": pdf_path.name,
+                            "Match type": "Template field",
+                            "Keyword": field,
+                            "Page": page["page"],
+                            "Section": "",
+                            "Label": field,
+                            "Value": value,
+                            "Context": f"{field}: {value}",
+                        })
+                        found = True
+                        break
+                if found:
+                    break
     return matches
 
 
@@ -267,17 +359,86 @@ def run_streamlit(set_page_config: bool = True) -> None:
     with st.form("keyword_search_form"):
         with st.sidebar:
             st.header("Search options")
-            keywords_input = st.text_input(
-                "Keywords",
-                placeholder="warranty, GEMC-SAMPLE",
-            )
+            template_keywords = []
+            template_name = None
+            try:
+                inspector = inspect(engine)
+                if inspector.has_table("Template_master"):
+                    with engine.connect() as connection:
+                        template_df = connection.execute(
+                            text("SELECT * FROM [Template_master]")
+                        )
+                        templates = pd.DataFrame(
+                            template_df.fetchall(),
+                            columns=template_df.keys(),
+                        )
+                    if not templates.empty:
+                        template_columns = {
+                            re.sub(r"[^a-z0-9]+", "", str(column).lower()).strip(): column
+                            for column in templates.columns
+                        }
+                        name_column = (
+                            template_columns.get("templatename")
+                            or template_columns.get("template")
+                            or template_columns.get("name")
+                        )
+                        keyword_column = (
+                            template_columns.get("keywords")
+                            or template_columns.get("keyword")
+                        )
+                        if name_column and keyword_column:
+                            template_options = ["None"] + [
+                                str(value).strip()
+                                for value in templates[name_column].dropna()
+                            ]
+                            template_name = st.selectbox(
+                                "Search by template",
+                                options=template_options,
+                            )
+                            if template_name != "None":
+                                selected_template = templates[
+                                    templates[name_column].astype(str) == template_name
+                                ].iloc[0]
+                                template_keywords = format_template_fields(
+                                    [
+                                        str(
+                                            selected_template[keyword_column] or ""
+                                        )
+                                    ]
+                                )
+                                st.caption(
+                                    "Template keywords: "
+                                    + ", ".join(template_keywords)
+                                )
+            except Exception as exc:
+                st.warning(f"Could not load templates: {exc}")
+
+            keywords_input = ""
+            if not template_name or template_name == "None":
+                keywords_input = st.text_input(
+                    "Keywords",
+                    placeholder="warranty, GEMC-SAMPLE",
+                )
             search_submitted = st.form_submit_button(
-                "Search Database",
+                (
+                    "Search Template Fields"
+                    if template_name and template_name != "None"
+                    else "Search Database"
+                ),
                 type="primary",
                 use_container_width=True,
             )
 
-    if not keywords_input.strip():
+    if template_name and template_name != "None":
+        keywords = template_keywords
+    else:
+        keywords = [
+            keyword.strip()
+            for keyword in re.split(r"[,;]", keywords_input)
+            if keyword.strip()
+        ]
+
+    if not keywords:
         st.info("Enter one or more keywords or values to search the database.")
         return
 
@@ -285,17 +446,11 @@ def run_streamlit(set_page_config: bool = True) -> None:
         st.info("Enter a keyword and select **Search Database**.")
         return
 
-    keywords = [
-        keyword.strip()
-        for keyword in re.split(r"[,;]", keywords_input)
-        if keyword.strip()
-    ]
-    if not keywords:
-        st.warning("Enter at least one keyword.")
-        return
-
     try:
-        matches = search_database(engine, keywords)
+        if template_name and template_name != "None":
+            matches = search_template_fields(files_dir, keywords)
+        else:
+            matches = search_database(engine, keywords)
     except Exception as exc:
         st.error(f"Could not search the database: {exc}")
         return
@@ -303,9 +458,17 @@ def run_streamlit(set_page_config: bool = True) -> None:
     st.success(f"Found {len(matches)} match(es).")
     if matches:
         matches_df = pd.DataFrame(matches)
-        display_df = matches_df[["Keyword", "File", "PDF File"]].copy()
-        display_df["PDF File"] = display_df["PDF File"].fillna("")
-        display_df["PDF File"] = display_df["PDF File"].replace("", "(not recorded)")
+        template_search = template_name and template_name != "None"
+        if template_search:
+            available_columns = [
+                column for column in ["File", "Keyword", "Page", "Context", "Value"]
+                if column in matches_df.columns
+            ]
+            display_df = matches_df[available_columns].copy()
+        else:
+            display_df = matches_df[["Keyword", "File", "PDF File"]].copy()
+            display_df["PDF File"] = display_df["PDF File"].fillna("")
+            display_df["PDF File"] = display_df["PDF File"].replace("", "(not recorded)")
         database_files = {}
         for match in matches:
             if match.get("Match type") != "Database":
@@ -321,12 +484,34 @@ def run_streamlit(set_page_config: bool = True) -> None:
 
         st.subheader("Search results")
         st.dataframe(display_df, use_container_width=True, hide_index=True)
-        st.download_button(
-            "Download results (CSV)",
-            data=display_df.to_csv(index=False).encode("utf-8-sig"),
-            file_name="search_results.csv",
-            mime="text/csv",
-        )
+        if not template_search:
+            st.download_button(
+                "Download results (CSV)",
+                data=display_df.to_csv(index=False).encode("utf-8-sig"),
+                file_name="search_results.csv",
+                mime="text/csv",
+            )
+
+        if template_search:
+            matched_files = sorted(
+                set(str(match.get("File", "")).strip() for match in matches if match.get("File"))
+            )
+            if matched_files:
+                st.subheader("Matched PDF files")
+                for index, file_name in enumerate(matched_files):
+                    saved_path = files_dir / file_name
+                    if not saved_path.is_file():
+                        continue
+                    with st.container(border=True):
+                        st.markdown(f"**{file_name}**")
+                        st.download_button(
+                            "Download file",
+                            data=saved_path.read_bytes(),
+                            file_name=file_name,
+                            mime="application/pdf",
+                            key=f"template_pdf_download_{index}_{saved_path.name}",
+                            use_container_width=True,
+                        )
 
         if database_files:
             st.subheader("Matched PDF files")
@@ -339,14 +524,6 @@ def run_streamlit(set_page_config: bool = True) -> None:
                     st.markdown(f"**{original_file or saved_path.name}**")
                     if saved_path.is_file():
                         download_name = original_file or saved_path.name
-                        with st.expander(
-                            f"Preview {original_file or saved_path.name}",
-                            expanded=True,
-                        ):
-                            st.pdf(
-                                saved_path.read_bytes(),
-                                height=600,
-                            )
                         st.download_button(
                             "Download file",
                             data=saved_path.read_bytes(),
