@@ -14,18 +14,6 @@ def _column_lookup(dataframe):
     }
 
 
-def _format_key_fields(raw_keys):
-    field_list = []
-    seen = set()
-    for field in re.split(r"[,;]", raw_keys):
-        field = re.sub(r"\s+", " ", field).strip(" \t:-")
-        normalized_field = field.lower()
-        if field and normalized_field not in seen:
-            seen.add(normalized_field)
-            field_list.append(field)
-    return field_list
-
-
 def run_template_management(connection_url, files_dir, set_page_config=True):
     if set_page_config:
         st.set_page_config(
@@ -50,9 +38,8 @@ def run_template_management(connection_url, files_dir, set_page_config=True):
                 placeholder="e.g. GeM Contract",
             )
             keywords = st.text_input(
-                "Key fields",
+                "Keywords",
                 placeholder="warranty, seller, contract number",
-                help="Enter only the fields you want to extract. Do not enter extra fields.",
             )
             template_pdf = st.file_uploader(
                 "Template PDF (optional)",
@@ -67,9 +54,15 @@ def run_template_management(connection_url, files_dir, set_page_config=True):
 
         if submitted:
             template_name = template_name.strip()
-            keyword_list = _format_key_fields(keywords)
+            keyword_list = [
+                item.strip()
+                for item in re.split(r"[,;]", keywords)
+                if item.strip()
+            ]
             if not template_name:
                 st.error("Enter a template name.")
+            elif not keyword_list:
+                st.error("Enter at least one keyword.")
             else:
                 pdf_name = ""
                 pdf_path = ""
@@ -79,12 +72,6 @@ def run_template_management(connection_url, files_dir, set_page_config=True):
                     Path(files_dir).joinpath(pdf_path).write_bytes(
                         template_pdf.getvalue()
                     )
-
-                if not keyword_list:
-                    st.error(
-                        "Enter the key fields that should be extracted from matching PDFs."
-                    )
-                    return
 
                 try:
                     if not inspector.has_table(table_name):
@@ -201,7 +188,7 @@ def run_template_management(connection_url, files_dir, set_page_config=True):
                     value=str(selected[name_column] or ""),
                 )
                 edited_keywords = st.text_input(
-                    "Key fields",
+                    "Keywords",
                     value=str(selected[keyword_column] or ""),
                 )
                 edited_pdf = st.file_uploader(
@@ -217,8 +204,7 @@ def run_template_management(connection_url, files_dir, set_page_config=True):
 
             if updated:
                 edited_name = edited_name.strip()
-                edited_keyword_list = _format_key_fields(edited_keywords)
-                edited_keywords = ", ".join(edited_keyword_list)
+                edited_keywords = edited_keywords.strip().strip(",;")
                 if not edited_name or not edited_keywords:
                     st.error("Template name and keywords are required.")
                 else:
